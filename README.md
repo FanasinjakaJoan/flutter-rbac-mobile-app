@@ -52,7 +52,7 @@ flutter doctor
 ## Installation et exécution
 
 ```bash
-git clone <url-du-depot>
+git clone https://github.com/FanasinjakaJoan/flutter-rbac-mobile-app.git
 cd flutter-rbac-mobile-app
 flutter pub get
 flutter run
