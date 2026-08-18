@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rbac_mobile_app/core/constants/app_routes.dart';
+import 'package:rbac_mobile_app/core/security/app_permission.dart';
 import 'package:rbac_mobile_app/core/security/rbac_policy.dart';
 import 'package:rbac_mobile_app/features/auth/domain/entities/app_user.dart';
 import 'package:rbac_mobile_app/features/auth/presentation/bloc/auth_bloc.dart';
@@ -218,64 +220,127 @@ class _MetricCard extends StatelessWidget {
       );
 }
 
+/// Entrée de navigation conditionnée par une permission RBAC.
+class _DrawerEntry {
+  const _DrawerEntry({
+    required this.route,
+    required this.label,
+    required this.icon,
+    this.permission,
+  });
+
+  final String route;
+  final String label;
+  final IconData icon;
+  final AppPermission? permission;
+}
+
 class _AppDrawer extends StatelessWidget {
   const _AppDrawer({required this.user, required this.accentColor});
 
   final AppUser user;
   final Color accentColor;
 
+  static const List<_DrawerEntry> _entries = [
+    _DrawerEntry(
+      route: '',
+      label: 'Tableau de bord',
+      icon: Icons.dashboard_outlined,
+    ),
+    _DrawerEntry(
+      route: AppRoutes.adminUsers,
+      label: 'Utilisateurs',
+      icon: Icons.groups_2_outlined,
+      permission: AppPermission.manageUsers,
+    ),
+    _DrawerEntry(
+      route: AppRoutes.adminPermissions,
+      label: 'Permissions',
+      icon: Icons.grid_view_rounded,
+      permission: AppPermission.managePermissions,
+    ),
+    _DrawerEntry(
+      route: AppRoutes.reports,
+      label: 'Rapports',
+      icon: Icons.insights_outlined,
+      permission: AppPermission.viewReports,
+    ),
+    _DrawerEntry(
+      route: AppRoutes.profile,
+      label: 'Mon profil',
+      icon: Icons.person_outline_rounded,
+      permission: AppPermission.editProfile,
+    ),
+  ];
+
   @override
-  Widget build(BuildContext context) => NavigationDrawer(
-        selectedIndex: 0,
-        onDestinationSelected: (index) {
-          Navigator.of(context).pop();
-          if (index == 0) {
-            context.go(RbacPolicy.dashboardFor(user.role));
-          } else {
-            context.read<AuthBloc>().add(const LogoutRequested());
-          }
-        },
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 28, 20, 18),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: accentColor,
-                  foregroundColor: Colors.white,
-                  child: Text(user.displayName.substring(0, 1).toUpperCase()),
+  Widget build(BuildContext context) {
+    final state = context.watch<AuthBloc>().state;
+    // Le menu est reconstruit à chaque changement de matrice : une permission
+    // retirée fait disparaître l'entrée correspondante en direct.
+    final visible = [
+      for (final entry in _entries)
+        if (entry.permission == null || state.can(entry.permission!)) entry,
+    ];
+
+    return NavigationDrawer(
+      selectedIndex: 0,
+      onDestinationSelected: (index) {
+        Navigator.of(context).pop();
+        if (index == visible.length) {
+          context.read<AuthBloc>().add(const LogoutRequested());
+          return;
+        }
+        final entry = visible[index];
+        context.go(
+          entry.route.isEmpty
+              ? RbacPolicy.landingFor(user.role, state.permissions)
+              : entry.route,
+        );
+      },
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 18),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: accentColor,
+                foregroundColor: Colors.white,
+                child: Text(user.displayName.substring(0, 1).toUpperCase()),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user.displayName,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      user.role.label,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user.displayName,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        user.role.label,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const NavigationDrawerDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard_rounded),
-            label: Text('Tableau de bord'),
+        ),
+        for (final entry in visible)
+          NavigationDrawerDestination(
+            key: Key('drawer-${entry.route.isEmpty ? 'dashboard' : entry.route}'),
+            icon: Icon(entry.icon),
+            label: Text(entry.label),
           ),
-          const NavigationDrawerDestination(
-            icon: Icon(Icons.logout_rounded),
-            label: Text('Se déconnecter'),
-          ),
-        ],
-      );
+        const NavigationDrawerDestination(
+          icon: Icon(Icons.logout_rounded),
+          label: Text('Se déconnecter'),
+        ),
+      ],
+    );
+  }
 }
 
 class DashboardSection extends StatelessWidget {

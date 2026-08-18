@@ -4,7 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:rbac_mobile_app/core/constants/app_routes.dart';
 import 'package:rbac_mobile_app/core/router/router_refresh_notifier.dart';
 import 'package:rbac_mobile_app/core/security/rbac_policy.dart';
+import 'package:rbac_mobile_app/core/security/rbac_service.dart';
 import 'package:rbac_mobile_app/core/security/user_role.dart';
+import 'package:rbac_mobile_app/features/admin/domain/repositories/user_directory_repository.dart';
+import 'package:rbac_mobile_app/features/admin/presentation/cubit/permission_matrix_cubit.dart';
+import 'package:rbac_mobile_app/features/admin/presentation/cubit/user_directory_cubit.dart';
+import 'package:rbac_mobile_app/features/admin/presentation/pages/permission_matrix_page.dart';
+import 'package:rbac_mobile_app/features/admin/presentation/pages/user_management_page.dart';
 import 'package:rbac_mobile_app/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rbac_mobile_app/features/auth/domain/usecases/request_password_reset.dart';
 import 'package:rbac_mobile_app/features/auth/domain/usecases/verify_reset_code.dart';
@@ -18,15 +24,27 @@ import 'package:rbac_mobile_app/features/auth/presentation/pages/unauthorized_pa
 import 'package:rbac_mobile_app/features/dashboard/presentation/pages/admin_dashboard_page.dart';
 import 'package:rbac_mobile_app/features/dashboard/presentation/pages/student_dashboard_page.dart';
 import 'package:rbac_mobile_app/features/dashboard/presentation/pages/technician_dashboard_page.dart';
+import 'package:rbac_mobile_app/features/profile/presentation/pages/profile_page.dart';
+import 'package:rbac_mobile_app/features/reports/presentation/pages/reports_page.dart';
 
 class AppRouter {
   AppRouter({
     required AuthBloc authBloc,
     required AuthRepository authRepository,
+    required RbacService rbacService,
+    required UserDirectoryRepository userDirectoryRepository,
     String initialLocation = AppRoutes.root,
   })  : _authBloc = authBloc,
-        _authRepository = authRepository {
-    _refreshNotifier = RouterRefreshNotifier(authBloc.stream);
+        _authRepository = authRepository,
+        _rbacService = rbacService,
+        _userDirectoryRepository = userDirectoryRepository {
+    // Le routeur écoute à la fois les changements d'authentification et les
+    // changements de matrice RBAC : une permission retirée déclenche donc
+    // immédiatement une réévaluation des gardes.
+    _refreshNotifier = RouterRefreshNotifier.merge([
+      authBloc.stream,
+      rbacService.changes,
+    ]);
     router = GoRouter(
       initialLocation: initialLocation,
       refreshListenable: _refreshNotifier,
@@ -76,6 +94,31 @@ class AppRouter {
           path: AppRoutes.technicianDashboard,
           builder: (context, state) => const TechnicianDashboardPage(),
         ),
+        GoRoute(
+          path: AppRoutes.adminUsers,
+          builder: (context, state) => BlocProvider(
+            create: (_) => UserDirectoryCubit(
+              repository: _userDirectoryRepository,
+              authBloc: _authBloc,
+            )..loadUsers(),
+            child: const UserManagementPage(),
+          ),
+        ),
+        GoRoute(
+          path: AppRoutes.adminPermissions,
+          builder: (context, state) => BlocProvider(
+            create: (_) => PermissionMatrixCubit(rbacService: _rbacService),
+            child: const PermissionMatrixPage(),
+          ),
+        ),
+        GoRoute(
+          path: AppRoutes.reports,
+          builder: (context, state) => const ReportsPage(),
+        ),
+        GoRoute(
+          path: AppRoutes.profile,
+          builder: (context, state) => const ProfilePage(),
+        ),
       ],
       errorBuilder: (context, state) => Scaffold(
         body: Center(
@@ -102,6 +145,8 @@ class AppRouter {
 
   final AuthBloc _authBloc;
   final AuthRepository _authRepository;
+  final RbacService _rbacService;
+  final UserDirectoryRepository _userDirectoryRepository;
   late final RouterRefreshNotifier _refreshNotifier;
   late final GoRouter router;
 
@@ -119,6 +164,7 @@ class AppRouter {
 
   String? _redirect(BuildContext context, GoRouterState routerState) {
     final authState = _authBloc.state;
+    final matrix = _rbacService.matrix;
     final path = routerState.uri.path;
     final isWaiting = authState.status == AuthStatus.initial ||
         authState.status == AuthStatus.loading;
@@ -161,32 +207,35 @@ class AppRouter {
     }
 
     if (_publicPaths.contains(path) || path == AppRoutes.root) {
-      return RbacPolicy.dashboardFor(user.role);
+      return RbacPolicy.landingFor(user.role, matrix);
     }
 
+    // Garde dynamique : la permission est relue dans la matrice courante à
+    // chaque navigation ET à chaque notification du refreshListenable.
     final requiredPermission = RbacPolicy.requiredPermission(path);
     if (requiredPermission != null &&
-        !RbacPolicy.can(user.role, requiredPermission)) {
+        !matrix.can(user.role, requiredPermission)) {
       return AppRoutes.unauthorized;
     }
     return null;
   }
 
   String _destinationFor(UserRole role, String? destination) {
+    final matrix = _rbacService.matrix;
     if (destination == null ||
         !destination.startsWith('/') ||
         destination.startsWith('//')) {
-      return RbacPolicy.dashboardFor(role);
+      return RbacPolicy.landingFor(role, matrix);
     }
     final destinationPath = Uri.parse(destination).path;
     final permission = RbacPolicy.requiredPermission(destinationPath);
-    if (permission != null && !RbacPolicy.can(role, permission)) {
+    if (permission != null && !matrix.can(role, permission)) {
       return AppRoutes.unauthorized;
     }
     if (_publicPaths.contains(destinationPath) ||
         destinationPath == AppRoutes.root ||
         destinationPath == AppRoutes.splash) {
-      return RbacPolicy.dashboardFor(role);
+      return RbacPolicy.landingFor(role, matrix);
     }
     return destination;
   }

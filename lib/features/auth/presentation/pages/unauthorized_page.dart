@@ -9,7 +9,8 @@ class UnauthorizedPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.select((AuthBloc bloc) => bloc.state.user);
+    final state = context.watch<AuthBloc>().state;
+    final user = state.user;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -50,7 +51,10 @@ class UnauthorizedPage extends StatelessWidget {
                         onPressed: user == null
                             ? null
                             : () => context.go(
-                                  RbacPolicy.dashboardFor(user.role),
+                                  RbacPolicy.landingFor(
+                                    user.role,
+                                    state.permissions,
+                                  ),
                                 ),
                         icon: const Icon(Icons.home_outlined),
                         label: const Text('Retour à mon tableau de bord'),

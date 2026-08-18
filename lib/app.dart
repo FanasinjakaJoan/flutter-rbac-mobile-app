@@ -23,6 +23,8 @@ class _RbacAppState extends State<RbacApp> {
     _appRouter = AppRouter(
       authBloc: widget.dependencies.authBloc,
       authRepository: widget.dependencies.authRepository,
+      rbacService: widget.dependencies.rbacService,
+      userDirectoryRepository: widget.dependencies.userDirectoryRepository,
     );
   }
 
@@ -30,6 +32,7 @@ class _RbacAppState extends State<RbacApp> {
   void dispose() {
     _appRouter.dispose();
     widget.dependencies.authBloc.close();
+    widget.dependencies.rbacService.dispose();
     super.dispose();
   }
 
